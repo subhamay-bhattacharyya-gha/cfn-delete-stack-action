@@ -1,44 +1,52 @@
-name: 'Action Name'
-description: 'Action Description'
-
-inputs:
-  input-1:
-    description: Input description.
-    required: false
-    default: default-value
-  input-2:
-    description: Input description.
-    required: false
-    default: default-value
-  input-3:
-    description: Input description.
-    required: false
-    default: default-value
-  github-token:
-    description: 'GitHub token'
-    required: true
-
-runs:
-  using: 'composite'
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.x
-
-    - name: Sample step to call GitHub API
+    - name: Delete CloudFormation Stack and Monitor Progress
       shell: bash
-      env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
       run: |
-        ISSUE_NUMBER="${{ github.event.issue.number }}"
-        REPO="${{ github.repository }}"
-        OWNER=$(echo $REPO | cut -d'/' -f1)
-        BRANCH_NAME="${{ steps.create-branch.outputs.branch-name }}"
-        COMMENT_BODY="Branch [$BRANCH_NAME](https://github.com/$OWNER/$REPO/tree/$BRANCH_NAME) created 🚀"
+        set -euo pipefail
 
-        curl -s -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d "{\"body\": \"$COMMENT_BODY\"}" \
-          https://api.github.com/repos/$REPO/issues/$ISSUE_NUMBER/comments
+        STACK_NAME="${{ inputs.stack-name }}"
+        REGION="${{ inputs.aws-region }}"
+        START_TIME=$(date +%s)
+        TIMEOUT=600  # Optional: make this an input if needed
+
+        echo "🚀 Initiating stack deletion: $STACK_NAME in $REGION"
+        aws cloudformation delete-stack \
+          --stack-name "$STACK_NAME" \
+          --region "$REGION"
+
+        echo "📡 Monitoring stack deletion..."
+
+        while true; do
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$REGION" > /dev/null 2>&1; then
+
+            STATUS=$(aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --region "$REGION" \
+              --query "Stacks[0].StackStatus" \
+              --output text)
+
+            echo "Current status: $STATUS"
+
+            if [[ "$STATUS" == "DELETE_FAILED" ]]; then
+              echo "❌ Stack deletion failed with status: $STATUS"
+              exit 1
+            fi
+
+          else
+            echo "✅ Stack deletion completed successfully!"
+            break
+          fi
+
+          CURRENT_TIME=$(date +%s)
+          ELAPSED=$((CURRENT_TIME - START_TIME))
+
+          if [[ $TIMEOUT -gt 0 && $ELAPSED -ge $TIMEOUT ]]; then
+            echo "⏱️ Timeout reached after $ELAPSED seconds. Exiting..."
+            exit 1
+          fi
+
+          sleep 5
+        done
+
+        echo "stack-name=$STACK_NAME" >> $GITHUB_OUTPUT
