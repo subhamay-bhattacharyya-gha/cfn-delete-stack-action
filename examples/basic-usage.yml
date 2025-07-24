@@ -1,0 +1,52 @@
+# Basic CloudFormation Stack Deletion
+# This workflow demonstrates the simplest usage of the CloudFormation Stack Delete action
+
+name: Basic Stack Deletion
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack-name:
+        description: 'Name of the CloudFormation stack to delete'
+        required: true
+        type: string
+      aws-region:
+        description: 'AWS region where the stack is located'
+        required: false
+        default: 'us-east-1'
+        type: choice
+        options:
+          - us-east-1
+          - us-west-1
+          - us-west-2
+          - eu-west-1
+          - eu-central-1
+          - ap-southeast-1
+
+jobs:
+  delete-stack:
+    name: Delete CloudFormation Stack
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+
+      - name: Delete CloudFormation Stack
+        id: delete-stack
+        uses: your-org/cloudformation-stack-delete-action@v1
+        with:
+          stack-name: ${{ github.event.inputs.stack-name }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+          wait-for-completion: 'true'
+
+      - name: Display Results
+        run: |
+          echo "Stack Status: ${{ steps.delete-stack.outputs.stack-status }}"
+          echo "Deletion Time: ${{ steps.delete-stack.outputs.deletion-time }}"
+          echo "Operation Result: ${{ steps.delete-stack.outputs.operation-result }}"
+          echo "Summary: ${{ steps.delete-stack.outputs.summary }}"

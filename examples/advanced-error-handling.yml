@@ -1,0 +1,374 @@
+# Advanced Error Handling and Monitoring
+# This workflow demonstrates comprehensive error handling, retry logic, and monitoring integration
+
+name: Advanced Stack Deletion with Error Handling
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack-name:
+        description: 'Name of the CloudFormation stack to delete'
+        required: true
+        type: string
+      aws-region:
+        description: 'AWS region where the stack is located'
+        required: false
+        default: 'us-east-1'
+        type: choice
+        options:
+          - us-east-1
+          - us-west-1
+          - us-west-2
+          - eu-west-1
+          - eu-central-1
+          - ap-southeast-1
+      max-retries:
+        description: 'Maximum number of retry attempts'
+        required: false
+        default: '3'
+        type: string
+      notification-webhook:
+        description: 'Webhook URL for notifications (optional)'
+        required: false
+        type: string
+
+env:
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK_URL }}
+  TEAMS_WEBHOOK: ${{ secrets.TEAMS_WEBHOOK_URL }}
+
+jobs:
+  pre-deletion-checks:
+    name: Pre-Deletion Validation
+    runs-on: ubuntu-latest
+    outputs:
+      stack-exists: ${{ steps.check-stack.outputs.exists }}
+      stack-status: ${{ steps.check-stack.outputs.status }}
+      has-dependencies: ${{ steps.check-dependencies.outputs.has-dependencies }}
+      can-proceed: ${{ steps.validation.outputs.can-proceed }}
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+
+      - name: Check Stack Existence and Status
+        id: check-stack
+        run: |
+          STACK_NAME="${{ github.event.inputs.stack-name }}"
+          
+          if aws cloudformation describe-stacks --stack-name "$STACK_NAME" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            
+            STATUS=$(aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --query 'Stacks[0].StackStatus' \
+              --output text)
+            echo "status=$STATUS" >> $GITHUB_OUTPUT
+            
+            echo "Stack exists with status: $STATUS"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "status=NOT_FOUND" >> $GITHUB_OUTPUT
+            echo "Stack does not exist"
+          fi
+
+      - name: Check for Stack Dependencies
+        id: check-dependencies
+        if: steps.check-stack.outputs.exists == 'true'
+        run: |
+          STACK_NAME="${{ github.event.inputs.stack-name }}"
+          
+          # Check for stacks that might depend on this stack
+          DEPENDENT_STACKS=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?contains(StackName, '$STACK_NAME') && StackName != '$STACK_NAME'].StackName" \
+            --output text)
+          
+          if [ -n "$DEPENDENT_STACKS" ]; then
+            echo "has-dependencies=true" >> $GITHUB_OUTPUT
+            echo "Found potentially dependent stacks:"
+            echo "$DEPENDENT_STACKS" | tr '\t' '\n'
+          else
+            echo "has-dependencies=false" >> $GITHUB_OUTPUT
+            echo "No dependent stacks found"
+          fi
+
+      - name: Validation Decision
+        id: validation
+        run: |
+          STACK_EXISTS="${{ steps.check-stack.outputs.exists }}"
+          STACK_STATUS="${{ steps.check-stack.outputs.status }}"
+          HAS_DEPENDENCIES="${{ steps.check-dependencies.outputs.has-dependencies }}"
+          
+          if [ "$STACK_EXISTS" = "false" ]; then
+            echo "can-proceed=skip" >> $GITHUB_OUTPUT
+            echo "Stack does not exist, will skip deletion"
+          elif [ "$STACK_STATUS" = "DELETE_IN_PROGRESS" ]; then
+            echo "can-proceed=monitor" >> $GITHUB_OUTPUT
+            echo "Stack is already being deleted, will monitor"
+          elif [ "$STACK_STATUS" = "DELETE_COMPLETE" ]; then
+            echo "can-proceed=skip" >> $GITHUB_OUTPUT
+            echo "Stack is already deleted"
+          elif [ "$HAS_DEPENDENCIES" = "true" ]; then
+            echo "can-proceed=warning" >> $GITHUB_OUTPUT
+            echo "Stack has potential dependencies, proceeding with caution"
+          else
+            echo "can-proceed=yes" >> $GITHUB_OUTPUT
+            echo "Stack can be safely deleted"
+          fi
+
+  delete-stack-with-retry:
+    name: Delete Stack with Retry Logic
+    runs-on: ubuntu-latest
+    needs: pre-deletion-checks
+    if: needs.pre-deletion-checks.outputs.can-proceed == 'yes' || needs.pre-deletion-checks.outputs.can-proceed == 'warning' || needs.pre-deletion-checks.outputs.can-proceed == 'monitor'
+    outputs:
+      final-result: ${{ steps.retry-logic.outputs.final-result }}
+      attempts-made: ${{ steps.retry-logic.outputs.attempts-made }}
+      total-time: ${{ steps.retry-logic.outputs.total-time }}
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+
+      - name: Delete Stack with Retry Logic
+        id: retry-logic
+        run: |
+          STACK_NAME="${{ github.event.inputs.stack-name }}"
+          MAX_RETRIES="${{ github.event.inputs.max-retries }}"
+          ATTEMPT=1
+          START_TIME=$(date +%s)
+          
+          echo "Starting deletion with up to $MAX_RETRIES attempts"
+          
+          while [ $ATTEMPT -le $MAX_RETRIES ]; do
+            echo "::group::Attempt $ATTEMPT of $MAX_RETRIES"
+            
+            # Use the action with error handling
+            if ${{ github.action_path }}/scripts/delete-stack.sh \
+                "$STACK_NAME" \
+                "${{ github.event.inputs.aws-region }}" \
+                "true"; then
+              
+              echo "::endgroup::"
+              echo "✅ Stack deletion successful on attempt $ATTEMPT"
+              echo "final-result=success" >> $GITHUB_OUTPUT
+              echo "attempts-made=$ATTEMPT" >> $GITHUB_OUTPUT
+              break
+            else
+              EXIT_CODE=$?
+              echo "::endgroup::"
+              echo "❌ Attempt $ATTEMPT failed with exit code $EXIT_CODE"
+              
+              if [ $ATTEMPT -eq $MAX_RETRIES ]; then
+                echo "final-result=failed" >> $GITHUB_OUTPUT
+                echo "attempts-made=$ATTEMPT" >> $GITHUB_OUTPUT
+                break
+              fi
+              
+              # Calculate backoff delay (exponential: 30s, 60s, 120s, etc.)
+              DELAY=$((30 * (2 ** ($ATTEMPT - 1))))
+              echo "Waiting ${DELAY}s before retry..."
+              sleep $DELAY
+              
+              ATTEMPT=$((ATTEMPT + 1))
+            fi
+          done
+          
+          END_TIME=$(date +%s)
+          TOTAL_TIME=$((END_TIME - START_TIME))
+          echo "total-time=${TOTAL_TIME}s" >> $GITHUB_OUTPUT
+
+      - name: Alternative Deletion Method
+        if: steps.retry-logic.outputs.final-result == 'failed'
+        id: alternative-deletion
+        run: |
+          echo "::warning::Standard deletion failed, attempting alternative method"
+          STACK_NAME="${{ github.event.inputs.stack-name }}"
+          
+          # Try force deletion (if supported by your infrastructure)
+          echo "Attempting force deletion..."
+          
+          # This is a placeholder for alternative deletion logic
+          # You might implement:
+          # - Manual resource cleanup
+          # - Different deletion strategies
+          # - Escalation to manual intervention
+          
+          echo "Alternative deletion method would be implemented here"
+          echo "result=manual-intervention-required" >> $GITHUB_OUTPUT
+
+  monitor-only:
+    name: Monitor Existing Deletion
+    runs-on: ubuntu-latest
+    needs: pre-deletion-checks
+    if: needs.pre-deletion-checks.outputs.can-proceed == 'monitor'
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+
+      - name: Monitor Existing Deletion
+        uses: your-org/cloudformation-stack-delete-action@v1
+        with:
+          stack-name: ${{ github.event.inputs.stack-name }}
+          aws-region: ${{ github.event.inputs.aws-region }}
+          wait-for-completion: 'true'
+
+  skip-deletion:
+    name: Skip Deletion
+    runs-on: ubuntu-latest
+    needs: pre-deletion-checks
+    if: needs.pre-deletion-checks.outputs.can-proceed == 'skip'
+    
+    steps:
+      - name: Log Skip Reason
+        run: |
+          echo "Skipping deletion for the following reason:"
+          if [ "${{ needs.pre-deletion-checks.outputs.stack-exists }}" = "false" ]; then
+            echo "Stack does not exist"
+          elif [ "${{ needs.pre-deletion-checks.outputs.stack-status }}" = "DELETE_COMPLETE" ]; then
+            echo "Stack is already deleted"
+          fi
+
+  send-notifications:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [pre-deletion-checks, delete-stack-with-retry, monitor-only, skip-deletion]
+    if: always()
+    
+    steps:
+      - name: Prepare Notification Data
+        id: prepare-notification
+        run: |
+          STACK_NAME="${{ github.event.inputs.stack-name }}"
+          REGION="${{ github.event.inputs.aws-region }}"
+          
+          # Determine overall result
+          if [ "${{ needs.delete-stack-with-retry.result }}" = "success" ]; then
+            RESULT="✅ Success"
+            COLOR="good"
+          elif [ "${{ needs.monitor-only.result }}" = "success" ]; then
+            RESULT="👀 Monitored"
+            COLOR="good"
+          elif [ "${{ needs.skip-deletion.result }}" = "success" ]; then
+            RESULT="⏭️ Skipped"
+            COLOR="warning"
+          else
+            RESULT="❌ Failed"
+            COLOR="danger"
+          fi
+          
+          echo "result=$RESULT" >> $GITHUB_OUTPUT
+          echo "color=$COLOR" >> $GITHUB_OUTPUT
+          
+          # Prepare detailed message
+          MESSAGE="Stack Deletion Report
+          Stack: $STACK_NAME
+          Region: $REGION
+          Result: $RESULT
+          Workflow: ${{ github.workflow }}
+          Run: ${{ github.run_number }}"
+          
+          if [ "${{ needs.delete-stack-with-retry.outputs.attempts-made }}" != "" ]; then
+            MESSAGE="$MESSAGE
+            Attempts: ${{ needs.delete-stack-with-retry.outputs.attempts-made }}
+            Total Time: ${{ needs.delete-stack-with-retry.outputs.total-time }}"
+          fi
+          
+          echo "message<<EOF" >> $GITHUB_OUTPUT
+          echo "$MESSAGE" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Send Slack Notification
+        if: env.SLACK_WEBHOOK != ''
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "CloudFormation Stack Deletion",
+              "attachments": [{
+                "color": "${{ steps.prepare-notification.outputs.color }}",
+                "fields": [{
+                  "title": "Stack Deletion Result",
+                  "value": "${{ steps.prepare-notification.outputs.message }}",
+                  "short": false
+                }]
+              }]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ env.SLACK_WEBHOOK }}
+
+      - name: Send Teams Notification
+        if: env.TEAMS_WEBHOOK != ''
+        run: |
+          curl -H "Content-Type: application/json" -d '{
+            "title": "CloudFormation Stack Deletion",
+            "text": "${{ steps.prepare-notification.outputs.message }}",
+            "themeColor": "${{ steps.prepare-notification.outputs.color == 'good' && '00FF00' || steps.prepare-notification.outputs.color == 'warning' && 'FFFF00' || 'FF0000' }}"
+          }' "${{ env.TEAMS_WEBHOOK }}"
+
+      - name: Send Custom Webhook Notification
+        if: github.event.inputs.notification-webhook != ''
+        run: |
+          curl -X POST -H "Content-Type: application/json" -d '{
+            "event": "stack-deletion",
+            "stack_name": "${{ github.event.inputs.stack-name }}",
+            "region": "${{ github.event.inputs.aws-region }}",
+            "result": "${{ steps.prepare-notification.outputs.result }}",
+            "workflow_run": "${{ github.run_number }}",
+            "repository": "${{ github.repository }}"
+          }' "${{ github.event.inputs.notification-webhook }}"
+
+  generate-report:
+    name: Generate Detailed Report
+    runs-on: ubuntu-latest
+    needs: [pre-deletion-checks, delete-stack-with-retry, monitor-only, skip-deletion]
+    if: always()
+    
+    steps:
+      - name: Generate Comprehensive Report
+        run: |
+          echo "# CloudFormation Stack Deletion Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Input Parameters" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Name**: ${{ github.event.inputs.stack-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **AWS Region**: ${{ github.event.inputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Max Retries**: ${{ github.event.inputs.max-retries }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Pre-Deletion Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Exists**: ${{ needs.pre-deletion-checks.outputs.stack-exists }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Status**: ${{ needs.pre-deletion-checks.outputs.stack-status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Has Dependencies**: ${{ needs.pre-deletion-checks.outputs.has-dependencies }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Decision**: ${{ needs.pre-deletion-checks.outputs.can-proceed }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Execution Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Pre-Deletion Checks**: ${{ needs.pre-deletion-checks.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Stack Deletion**: ${{ needs.delete-stack-with-retry.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Monitor Only**: ${{ needs.monitor-only.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Skip Deletion**: ${{ needs.skip-deletion.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.delete-stack-with-retry.outputs.attempts-made }}" != "" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Retry Statistics" >> $GITHUB_STEP_SUMMARY
+            echo "- **Attempts Made**: ${{ needs.delete-stack-with-retry.outputs.attempts-made }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Total Time**: ${{ needs.delete-stack-with-retry.outputs.total-time }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Final Result**: ${{ needs.delete-stack-with-retry.outputs.final-result }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Workflow Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Workflow Run**: [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered By**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: ${{ github.repository }}" >> $GITHUB_STEP_SUMMARY

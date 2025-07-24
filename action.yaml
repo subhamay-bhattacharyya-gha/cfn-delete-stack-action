@@ -1,44 +1,74 @@
-name: 'Action Name'
-description: 'Action Description'
+name: 'CloudFormation Stack Delete'
+description: 'Delete AWS CloudFormation stacks with real-time logging and monitoring'
 
 inputs:
-  input-1:
-    description: Input description.
-    required: false
-    default: default-value
-  input-2:
-    description: Input description.
-    required: false
-    default: default-value
-  input-3:
-    description: Input description.
-    required: false
-    default: default-value
-  github-token:
-    description: 'GitHub token'
+  stack-name:
+    description: 'Name of the CloudFormation stack to delete'
     required: true
+  aws-region:
+    description: 'AWS region where the stack is located'
+    required: false
+    default: 'us-east-1'
+  wait-for-completion:
+    description: 'Whether to wait for deletion to complete'
+    required: false
+    default: 'true'
+
+outputs:
+  stack-status:
+    description: 'Final status of the stack deletion operation'
+  deletion-time:
+    description: 'Time taken for the deletion process'
+  operation-result:
+    description: 'Result of the deletion operation (success, failed, timeout, skipped, error)'
+  summary:
+    description: 'Human-readable summary of the deletion process'
 
 runs:
   using: 'composite'
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: 3.x
+    - name: Install AWS CLI
+      shell: bash
+      run: |
+        # Check if AWS CLI is already installed
+        if ! command -v aws >/dev/null 2>&1; then
+          echo "Installing AWS CLI..."
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip -q awscliv2.zip
+          sudo ./aws/install
+          rm -rf awscliv2.zip aws/
+        else
+          echo "AWS CLI is already installed"
+          aws --version
+        fi
 
-    - name: Sample step to call GitHub API
+    - name: Configure AWS CLI
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Validate AWS Configuration
       shell: bash
       env:
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        AWS_REGION: ${{ inputs.aws-region }}
       run: |
-        ISSUE_NUMBER="${{ github.event.issue.number }}"
-        REPO="${{ github.repository }}"
-        OWNER=$(echo $REPO | cut -d'/' -f1)
-        BRANCH_NAME="${{ steps.create-branch.outputs.branch-name }}"
-        COMMENT_BODY="Branch [$BRANCH_NAME](https://github.com/$OWNER/$REPO/tree/$BRANCH_NAME) created 🚀"
+        # Make scripts executable
+        chmod +x ${{ github.action_path }}/scripts/*.sh
+        
+        # Source utility functions
+        source ${{ github.action_path }}/scripts/utils.sh
+        
+        # Validate AWS configuration and credentials
+        ${{ github.action_path }}/scripts/validate-aws-config.sh
 
-        curl -s -X POST \
-          -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Content-Type: application/json" \
-          -d "{\"body\": \"$COMMENT_BODY\"}" \
-          https://api.github.com/repos/$REPO/issues/$ISSUE_NUMBER/comments
+    - name: Delete CloudFormation Stack
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws-region }}
+        DEBUG: ${{ runner.debug && 'true' || 'false' }}
+      run: |
+        # Execute main orchestration script with validated parameters
+        ${{ github.action_path }}/scripts/delete-stack.sh \
+          "${{ inputs.stack-name }}" \
+          "${{ inputs.aws-region }}" \
+          "${{ inputs.wait-for-completion }}"
