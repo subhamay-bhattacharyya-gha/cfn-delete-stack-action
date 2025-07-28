@@ -57,7 +57,7 @@ validate_aws_credentials() {
 }
 
 # Validate AWS region configuration
-validate_aws_region() {
+validate_aws_region_config() {
     log_info "Validating AWS region configuration..."
     
     local configured_region="${AWS_REGION:-}"
@@ -297,7 +297,7 @@ main() {
     # Perform all validation checks
     validate_aws_cli_installation
     validate_aws_credentials
-    validate_aws_region
+    validate_aws_region_config
     test_aws_service_connectivity
     validate_cloudformation_access
     validate_cloudformation_operations

@@ -100,7 +100,7 @@ validate_aws_environment() {
         handle_auth_error "AWS credentials validation failed"
     fi
     
-    if ! validate_aws_region; then
+    if ! validate_aws_region_config; then
         handle_auth_error "AWS region validation failed"
     fi
     

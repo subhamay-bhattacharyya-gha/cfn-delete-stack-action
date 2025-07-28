@@ -172,7 +172,7 @@ test_validate_aws_region_from_env() {
     export AWS_REGION="us-west-2"
     
     local exit_code=0
-    validate_aws_region || exit_code=$?
+    validate_aws_region_config || exit_code=$?
     
     assert_equals 0 "$exit_code" "Should succeed with AWS_REGION environment variable"
     assert_equals "us-west-2" "$AWS_DEFAULT_REGION" "Should set AWS_DEFAULT_REGION"
@@ -188,7 +188,7 @@ test_validate_aws_region_from_config() {
     unset AWS_REGION 2>/dev/null || true
     
     local exit_code=0
-    validate_aws_region || exit_code=$?
+    validate_aws_region_config || exit_code=$?
     
     assert_equals 0 "$exit_code" "Should succeed with region from AWS config"
     restore_command "aws"
@@ -206,7 +206,7 @@ test_validate_aws_region_not_configured() {
     unset AWS_REGION 2>/dev/null || true
     
     local exit_code=0
-    (validate_aws_region) 2>/dev/null || exit_code=$?
+    (validate_aws_region_config) 2>/dev/null || exit_code=$?
     
     assert_equals 2 "$exit_code" "Should fail when no region is configured"
     restore_command "aws"
@@ -224,7 +224,7 @@ test_validate_aws_region_invalid_format() {
     unset AWS_REGION 2>/dev/null || true
     
     local exit_code=0
-    (validate_aws_region) 2>/dev/null || exit_code=$?
+    (validate_aws_region_config) 2>/dev/null || exit_code=$?
     
     assert_equals 2 "$exit_code" "Should fail with invalid region format"
     restore_command "aws"
@@ -237,7 +237,7 @@ test_validate_aws_region_inaccessible() {
     export AWS_REGION="us-fake-1"
     
     local exit_code=0
-    (validate_aws_region) 2>/dev/null || exit_code=$?
+    (validate_aws_region_config) 2>/dev/null || exit_code=$?
     
     assert_equals 2 "$exit_code" "Should fail with inaccessible region"
     
