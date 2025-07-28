@@ -244,7 +244,11 @@ monitor_stack_events() {
             # Check if stack has reached completion state
             if [[ "$current_status" == "STACK_NOT_FOUND" ]]; then
                 # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
-                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                local truncated_stack_name="${stack_name}"
+                if [[ ${#truncated_stack_name} -gt 50 ]]; then
+                    truncated_stack_name="${truncated_stack_name:0:47}..."
+                fi
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${truncated_stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
                 ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted"
@@ -269,7 +273,11 @@ monitor_stack_events() {
             verify_result=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
             if [[ "$verify_result" =~ "does not exist" ]]; then
                 # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
-                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                local truncated_stack_name="${stack_name}"
+                if [[ ${#truncated_stack_name} -gt 50 ]]; then
+                    truncated_stack_name="${truncated_stack_name:0:47}..."
+                fi
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${truncated_stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
                 ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted (confirmed by verification check)"
