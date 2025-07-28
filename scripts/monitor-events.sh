@@ -14,12 +14,7 @@ readonly DEFAULT_POLL_INTERVAL=5
 readonly MAX_EVENTS_PER_POLL=50
 readonly EVENT_DISPLAY_WIDTH=120
 
-# Event status colors for better visibility
-readonly STATUS_COLOR_SUCCESS='\033[0;32m'    # Green
-readonly STATUS_COLOR_FAILED='\033[0;31m'     # Red
-readonly STATUS_COLOR_IN_PROGRESS='\033[0;33m' # Yellow
-readonly STATUS_COLOR_INFO='\033[0;36m'       # Cyan
-readonly STATUS_COLOR_RESET='\033[0m'         # Reset
+# Event status colors disabled for clean output in CI/CD environments
 
 # Stack completion states
 readonly COMPLETION_STATES=(
@@ -75,17 +70,21 @@ get_stack_events_since() {
         return 1
     fi
     
-    # Filter events since the specified timestamp using jq
+    # Filter events since the specified timestamp and only show DELETE events
     local filtered_events
     if [[ -n "$since_timestamp" ]] && [[ "$since_timestamp" != "null" ]]; then
         filtered_events=$(echo "$result" | jq --arg since "$since_timestamp" '
             .StackEvents 
-            | map(select(.Timestamp > $since))
+            | map(select(.Timestamp > $since and (.ResourceStatus | contains("DELETE"))))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     else
-        # If no timestamp provided, get all events (sorted by timestamp)
-        filtered_events=$(echo "$result" | jq '.StackEvents | sort_by(.Timestamp)' 2>/dev/null)
+        # If no timestamp provided, get only recent DELETE events (sorted by timestamp)
+        filtered_events=$(echo "$result" | jq '
+            .StackEvents 
+            | map(select(.ResourceStatus | contains("DELETE")))
+            | sort_by(.Timestamp)
+        ' 2>/dev/null)
     fi
     
     # Validate the filtered result
@@ -120,26 +119,9 @@ format_and_display_event() {
         display_timestamp="--:--:--"
     fi
     
-    # Choose color based on resource status
-    local status_color="$STATUS_COLOR_RESET"
-    case "$resource_status" in
-        *"COMPLETE")
-            status_color="$STATUS_COLOR_SUCCESS"
-            ;;
-        *"FAILED")
-            status_color="$STATUS_COLOR_FAILED"
-            ;;
-        *"IN_PROGRESS")
-            status_color="$STATUS_COLOR_IN_PROGRESS"
-            ;;
-        *)
-            status_color="$STATUS_COLOR_INFO"
-            ;;
-    esac
-    
-    # Format the event line with proper spacing
+    # Format the event line with proper spacing (no colors for clean CI/CD output)
     local resource_info="${resource_type}/${logical_id}"
-    local status_display="${status_color}${resource_status}${STATUS_COLOR_RESET}"
+    local status_display="${resource_status}"
     
     # Truncate long resource info and status reason if needed
     if [[ ${#resource_info} -gt 50 ]]; then
@@ -229,7 +211,7 @@ monitor_stack_events() {
     display_events_header "$stack_name"
     
     # Initialize tracking variables
-    local last_event_timestamp=""
+    local last_event_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
     local start_time
     start_time=$(date +%s)
     local events_displayed=0
