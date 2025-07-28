@@ -75,14 +75,14 @@ get_stack_events_since() {
     if [[ -n "$since_timestamp" ]] && [[ "$since_timestamp" != "null" ]]; then
         filtered_events=$(echo "$result" | jq --arg since "$since_timestamp" '
             .StackEvents 
-            | map(select(.Timestamp > $since))
+            | map(select(.Timestamp > $since and (.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED"))))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     else
-        # If no timestamp provided, get all events from stack history (temporarily show all to debug)
-        # TODO: This shows all events for debugging - will filter back to DELETE only after testing
+        # If no timestamp provided, get all DELETE events from stack history
         filtered_events=$(echo "$result" | jq '
             .StackEvents 
+            | map(select(.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED")))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     fi
@@ -94,16 +94,10 @@ get_stack_events_since() {
         return 1
     fi
     
-    # Debug: log how many events were found
+    # Debug: log how many events were found (to stderr to not interfere with table)
     local event_count
     event_count=$(echo "$filtered_events" | jq 'length' 2>/dev/null || echo "0")
-    log_info "Found $event_count total events for stack"
-    
-    # Debug: log the actual events found
-    if [[ "$event_count" -gt 0 ]]; then
-        log_info "All events found:"
-        echo "$filtered_events" | jq -r '.[] | "\(.Timestamp) \(.ResourceType)/\(.LogicalResourceId) \(.ResourceStatus) \(.ResourceStatusReason // "")"' >&2 || true
-    fi
+    log_debug "Found $event_count total events for stack"
     
     echo "$filtered_events"
     return 0
@@ -249,16 +243,9 @@ monitor_stack_events() {
         if [[ $status_exit_code -eq 0 ]]; then
             # Check if stack has reached completion state
             if [[ "$current_status" == "STACK_NOT_FOUND" ]]; then
-                log_info "Stack no longer exists, waiting 3 seconds for final events..."
-                sleep 3
-                # Try to get any final events
-                local final_events
-                final_events=$(get_stack_events_since "$stack_name" "" "$region")
-                if [[ $? -eq 0 ]] && [[ -n "$final_events" ]]; then
-                    local final_count
-                    final_count=$(echo "$final_events" | jq 'length' 2>/dev/null || echo "0")
-                    log_info "Final check found $final_count total events"
-                fi
+                # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "AWS::CloudFormation::Stack/${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted"
                 monitoring_active=false
@@ -281,27 +268,9 @@ monitor_stack_events() {
             local verify_result
             verify_result=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
             if [[ "$verify_result" =~ "does not exist" ]]; then
-                # Give a moment to fetch any final events before stopping
-                log_debug "Stack deleted, fetching final events before stopping monitoring"
-                local final_events
-                final_events=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
-                if [[ $? -eq 0 ]] && [[ -n "$final_events" ]]; then
-                    local final_count
-                    final_count=$(echo "$final_events" | jq 'length' 2>/dev/null || echo "0")
-                    if [[ "$final_count" -gt 0 ]]; then
-                        log_debug "Displaying $final_count final events"
-                        local i=0
-                        while [[ $i -lt $final_count ]]; do
-                            local event
-                            event=$(echo "$final_events" | jq ".[$i]" 2>/dev/null)
-                            if [[ -n "$event" ]] && [[ "$event" != "null" ]]; then
-                                format_and_display_event "$event"
-                                ((events_displayed++))
-                            fi
-                            ((i++))
-                        done
-                    fi
-                fi
+                # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "AWS::CloudFormation::Stack/${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted (confirmed by verification check)"
                 monitoring_active=false
