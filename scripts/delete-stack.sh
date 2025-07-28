@@ -299,7 +299,7 @@ detect_deletion_completion() {
     local completion_exit_code=$?
     
     # Parse completion result
-    local detection_result completion_status final_completion_status
+    local detection_result="" completion_status="" final_completion_status=""
     while IFS='=' read -r key value; do
         case "$key" in
             "DETECTION_RESULT")

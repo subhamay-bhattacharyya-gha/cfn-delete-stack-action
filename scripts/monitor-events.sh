@@ -47,13 +47,15 @@ get_stack_events_since() {
         aws_cmd="$aws_cmd --region '$region'"
     fi
     
-    # Execute command with enhanced retry logic and timeout
+    # Execute command directly (no retry needed for event fetching during monitoring)
     local result
-    result=$(retry_aws_operation_with_backoff "$aws_cmd" "Get stack events for '$stack_name'" 5 1 30 120)
+    result=$(eval "$aws_cmd" 2>&1)
     local exit_code=$?
     
-    # Handle the result using enhanced error handling
-    if ! handle_aws_operation_error "$exit_code" "$result" "Get stack events" "$stack_name"; then
+    if [[ $exit_code -eq 0 ]]; then
+        # Command succeeded, continue with processing
+        :
+    else
         # Check if stack doesn't exist (which is expected for completed deletions)
         if [[ "$result" =~ "does not exist" ]] || [[ "$result" =~ "ValidationError" ]]; then
             log_debug "Stack '$stack_name' no longer exists - deletion completed"
@@ -188,15 +190,18 @@ get_current_stack_status() {
         aws_cmd="$aws_cmd --region '$region'"
     fi
     
-    # Execute command with enhanced retry logic
+    # Execute command with direct error handling (bypass retry for monitoring)
     local result
-    result=$(retry_aws_operation_with_backoff "$aws_cmd" "Get stack status for '$stack_name'" 3 1 15 60)
+    result=$(eval "$aws_cmd" 2>&1)
     local exit_code=$?
     
-    # Handle the result using enhanced error handling
-    if ! handle_aws_operation_error "$exit_code" "$result" "Get stack status" "$stack_name"; then
-        # Check if stack doesn't exist
+    if [[ $exit_code -eq 0 ]]; then
+        echo "$result"
+        return 0
+    else
+        # Check if stack doesn't exist (expected during deletion)
         if [[ "$result" =~ "does not exist" ]] || [[ "$result" =~ "ValidationError" ]]; then
+            log_debug "Stack '$stack_name' no longer exists (deletion completed)"
             echo "STACK_NOT_FOUND"
             return 0
         else
