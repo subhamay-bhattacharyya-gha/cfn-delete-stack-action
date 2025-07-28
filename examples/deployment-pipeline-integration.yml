@@ -1,0 +1,308 @@
+# Deployment Pipeline with Stack Management
+# This workflow demonstrates integration with deployment pipelines and comprehensive error handling
+
+name: Deploy and Manage Stacks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'Action to perform'
+        required: true
+        type: choice
+        options:
+          - deploy
+          - cleanup-old
+          - rollback
+          - full-cleanup
+      stack-version:
+        description: 'Stack version (for rollback)'
+        required: false
+        type: string
+
+env:
+  APP_NAME: my-application
+  AWS_REGION: us-east-1
+
+jobs:
+  determine-action:
+    name: Determine Action
+    runs-on: ubuntu-latest
+    outputs:
+      action: ${{ steps.determine.outputs.action }}
+      environment: ${{ steps.determine.outputs.environment }}
+      stack-suffix: ${{ steps.determine.outputs.stack-suffix }}
+    
+    steps:
+      - name: Determine Action and Environment
+        id: determine
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ github.event.inputs.action }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "action=deploy" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "action=deploy" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "action=deploy" >> $GITHUB_OUTPUT
+          fi
+          
+          # Determine environment and stack suffix
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+            echo "stack-suffix=prod" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/develop" ]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+            echo "stack-suffix=staging" >> $GITHUB_OUTPUT
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "environment=development" >> $GITHUB_OUTPUT
+            echo "stack-suffix=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=development" >> $GITHUB_OUTPUT
+            echo "stack-suffix=dev" >> $GITHUB_OUTPUT
+          fi
+
+  deploy:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: determine-action
+    if: needs.determine-action.outputs.action == 'deploy'
+    outputs:
+      new-stack-name: ${{ steps.deploy.outputs.stack-name }}
+      deployment-success: ${{ steps.deploy.outcome == 'success' }}
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy New Stack
+        id: deploy
+        run: |
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          STACK_NAME="${{ env.APP_NAME }}-${{ needs.determine-action.outputs.stack-suffix }}-${TIMESTAMP}"
+          
+          echo "Deploying stack: $STACK_NAME"
+          echo "stack-name=$STACK_NAME" >> $GITHUB_OUTPUT
+          
+          # Simulate deployment (replace with actual deployment logic)
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation-template.yaml \
+            --parameters ParameterKey=Environment,ParameterValue=${{ needs.determine-action.outputs.environment }} \
+            --capabilities CAPABILITY_IAM || true
+          
+          echo "Deployment initiated for stack: $STACK_NAME"
+
+  cleanup-old-stacks:
+    name: Cleanup Old Stacks
+    runs-on: ubuntu-latest
+    needs: [determine-action, deploy]
+    if: always() && (needs.determine-action.outputs.action == 'deploy' || needs.determine-action.outputs.action == 'cleanup-old') && needs.deploy.outputs.deployment-success == 'true'
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find Old Stacks
+        id: find-old-stacks
+        run: |
+          # Find stacks older than the current deployment
+          CURRENT_STACK="${{ needs.deploy.outputs.new-stack-name }}"
+          STACK_PREFIX="${{ env.APP_NAME }}-${{ needs.determine-action.outputs.stack-suffix }}"
+          
+          OLD_STACKS=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?starts_with(StackName, '$STACK_PREFIX') && StackName != '$CURRENT_STACK'].StackName" \
+            --output text)
+          
+          if [ -n "$OLD_STACKS" ]; then
+            echo "Found old stacks to cleanup:"
+            echo "$OLD_STACKS" | tr '\t' '\n'
+            
+            # Keep only the 2 most recent stacks (excluding current)
+            STACKS_TO_DELETE=$(echo "$OLD_STACKS" | tr '\t' '\n' | sort -r | tail -n +3)
+            
+            if [ -n "$STACKS_TO_DELETE" ]; then
+              STACK_ARRAY=$(echo "$STACKS_TO_DELETE" | jq -R . | jq -s .)
+              echo "stacks-to-delete=$STACK_ARRAY" >> $GITHUB_OUTPUT
+              echo "has-stacks-to-delete=true" >> $GITHUB_OUTPUT
+            else
+              echo "has-stacks-to-delete=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "No old stacks found"
+            echo "has-stacks-to-delete=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete Old Stacks
+        if: steps.find-old-stacks.outputs.has-stacks-to-delete == 'true'
+        strategy:
+          matrix:
+            stack-name: ${{ fromJson(steps.find-old-stacks.outputs.stacks-to-delete) }}
+          fail-fast: false
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: ${{ matrix.stack-name }}
+          aws-region: ${{ env.AWS_REGION }}
+          wait-for-completion: 'false'  # Don't wait to speed up cleanup
+        continue-on-error: true
+
+  rollback:
+    name: Rollback to Previous Version
+    runs-on: ubuntu-latest
+    needs: determine-action
+    if: needs.determine-action.outputs.action == 'rollback'
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find Current Stack
+        id: find-current
+        run: |
+          STACK_PREFIX="${{ env.APP_NAME }}-${{ needs.determine-action.outputs.stack-suffix }}"
+          
+          CURRENT_STACK=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?starts_with(StackName, '$STACK_PREFIX')].StackName" \
+            --output text | tr '\t' '\n' | sort -r | head -1)
+          
+          if [ -n "$CURRENT_STACK" ]; then
+            echo "current-stack=$CURRENT_STACK" >> $GITHUB_OUTPUT
+            echo "Current stack: $CURRENT_STACK"
+          else
+            echo "No current stack found"
+            exit 1
+          fi
+
+      - name: Delete Current Stack
+        if: steps.find-current.outputs.current-stack != ''
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: ${{ steps.find-current.outputs.current-stack }}
+          aws-region: ${{ env.AWS_REGION }}
+          wait-for-completion: 'true'
+
+      - name: Deploy Rollback Version
+        if: github.event.inputs.stack-version != ''
+        run: |
+          ROLLBACK_STACK="${{ env.APP_NAME }}-${{ needs.determine-action.outputs.stack-suffix }}-${{ github.event.inputs.stack-version }}"
+          echo "Rolling back to stack version: $ROLLBACK_STACK"
+          
+          # Check if rollback stack exists
+          if aws cloudformation describe-stacks --stack-name "$ROLLBACK_STACK" >/dev/null 2>&1; then
+            echo "Rollback stack exists, no action needed"
+          else
+            echo "::error::Rollback stack $ROLLBACK_STACK does not exist"
+            exit 1
+          fi
+
+  full-cleanup:
+    name: Full Environment Cleanup
+    runs-on: ubuntu-latest
+    needs: determine-action
+    if: needs.determine-action.outputs.action == 'full-cleanup'
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Find All Environment Stacks
+        id: find-all-stacks
+        run: |
+          STACK_PREFIX="${{ env.APP_NAME }}-${{ needs.determine-action.outputs.stack-suffix }}"
+          
+          ALL_STACKS=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE CREATE_FAILED UPDATE_FAILED \
+            --query "StackSummaries[?starts_with(StackName, '$STACK_PREFIX')].StackName" \
+            --output text)
+          
+          if [ -n "$ALL_STACKS" ]; then
+            STACK_ARRAY=$(echo "$ALL_STACKS" | tr '\t' '\n' | jq -R . | jq -s .)
+            echo "all-stacks=$STACK_ARRAY" >> $GITHUB_OUTPUT
+            echo "has-stacks=true" >> $GITHUB_OUTPUT
+            
+            echo "Found stacks for cleanup:"
+            echo "$ALL_STACKS" | tr '\t' '\n'
+          else
+            echo "No stacks found for cleanup"
+            echo "has-stacks=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Delete All Environment Stacks
+        if: steps.find-all-stacks.outputs.has-stacks == 'true'
+        strategy:
+          matrix:
+            stack-name: ${{ fromJson(steps.find-all-stacks.outputs.all-stacks) }}
+          fail-fast: false
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: ${{ matrix.stack-name }}
+          aws-region: ${{ env.AWS_REGION }}
+          wait-for-completion: 'true'
+        continue-on-error: true
+
+  cleanup-pr-on-close:
+    name: Cleanup PR Stack on Close
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete PR Stack
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: ${{ env.APP_NAME }}-pr-${{ github.event.pull_request.number }}
+          aws-region: ${{ env.AWS_REGION }}
+          wait-for-completion: 'false'
+        continue-on-error: true
+
+  notify-results:
+    name: Notify Results
+    runs-on: ubuntu-latest
+    needs: [determine-action, deploy, cleanup-old-stacks, rollback, full-cleanup]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Deployment Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Action**: ${{ needs.determine-action.outputs.action }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment**: ${{ needs.determine-action.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Region**: ${{ env.AWS_REGION }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "### Job Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deploy**: ${{ needs.deploy.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cleanup Old**: ${{ needs.cleanup-old-stacks.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rollback**: ${{ needs.rollback.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full Cleanup**: ${{ needs.full-cleanup.result || 'skipped' }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ needs.deploy.outputs.new-stack-name }}" != "" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**New Stack**: ${{ needs.deploy.outputs.new-stack-name }}" >> $GITHUB_STEP_SUMMARY
+          fi

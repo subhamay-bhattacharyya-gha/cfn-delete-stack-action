@@ -1,0 +1,213 @@
+# Conditional Stack Deletion with Error Handling
+# This workflow demonstrates advanced error handling and conditional logic
+
+name: Conditional Stack Deletion
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack-prefix:
+        description: 'Stack name prefix to search for'
+        required: true
+        type: string
+      environment:
+        description: 'Environment to target'
+        required: true
+        type: choice
+        options:
+          - development
+          - staging
+          - production
+      force-delete:
+        description: 'Force deletion even if stack has dependencies'
+        required: false
+        default: false
+        type: boolean
+      dry-run:
+        description: 'Perform a dry run (show what would be deleted)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  validate-environment:
+    name: Validate Environment
+    runs-on: ubuntu-latest
+    outputs:
+      can-proceed: ${{ steps.validation.outputs.can-proceed }}
+      aws-region: ${{ steps.validation.outputs.aws-region }}
+    
+    steps:
+      - name: Validate Environment and Permissions
+        id: validation
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            "development")
+              echo "aws-region=us-east-1" >> $GITHUB_OUTPUT
+              echo "can-proceed=true" >> $GITHUB_OUTPUT
+              ;;
+            "staging")
+              echo "aws-region=us-west-2" >> $GITHUB_OUTPUT
+              echo "can-proceed=true" >> $GITHUB_OUTPUT
+              ;;
+            "production")
+              # Production requires additional approval
+              if [ "${{ github.actor }}" = "admin-user" ] || [ "${{ github.event.inputs.force-delete }}" = "true" ]; then
+                echo "aws-region=us-east-1" >> $GITHUB_OUTPUT
+                echo "can-proceed=true" >> $GITHUB_OUTPUT
+              else
+                echo "can-proceed=false" >> $GITHUB_OUTPUT
+                echo "::error::Production deletions require admin approval or force-delete flag"
+              fi
+              ;;
+            *)
+              echo "can-proceed=false" >> $GITHUB_OUTPUT
+              echo "::error::Invalid environment specified"
+              ;;
+          esac
+
+  list-stacks:
+    name: List Matching Stacks
+    runs-on: ubuntu-latest
+    needs: validate-environment
+    if: needs.validate-environment.outputs.can-proceed == 'true'
+    outputs:
+      stack-list: ${{ steps.find-stacks.outputs.stack-list }}
+      stack-count: ${{ steps.find-stacks.outputs.stack-count }}
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.validate-environment.outputs.aws-region }}
+
+      - name: Find Matching Stacks
+        id: find-stacks
+        run: |
+          # Find stacks matching the prefix
+          STACKS=$(aws cloudformation list-stacks \
+            --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE \
+            --query "StackSummaries[?starts_with(StackName, '${{ github.event.inputs.stack-prefix }}')].StackName" \
+            --output text)
+          
+          if [ -z "$STACKS" ]; then
+            echo "stack-list=" >> $GITHUB_OUTPUT
+            echo "stack-count=0" >> $GITHUB_OUTPUT
+            echo "No stacks found matching prefix: ${{ github.event.inputs.stack-prefix }}"
+          else
+            # Convert to JSON array
+            STACK_ARRAY=$(echo "$STACKS" | tr '\t' '\n' | jq -R . | jq -s .)
+            echo "stack-list=$STACK_ARRAY" >> $GITHUB_OUTPUT
+            echo "stack-count=$(echo "$STACKS" | wc -w)" >> $GITHUB_OUTPUT
+            
+            echo "Found stacks:"
+            echo "$STACKS" | tr '\t' '\n'
+          fi
+
+  dry-run:
+    name: Dry Run - Show What Would Be Deleted
+    runs-on: ubuntu-latest
+    needs: [validate-environment, list-stacks]
+    if: github.event.inputs.dry-run == 'true' && needs.list-stacks.outputs.stack-count != '0'
+    
+    steps:
+      - name: Display Dry Run Results
+        run: |
+          echo "## Dry Run Results" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "Region: ${{ needs.validate-environment.outputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
+          echo "Stack Prefix: ${{ github.event.inputs.stack-prefix }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stacks that would be deleted:" >> $GITHUB_STEP_SUMMARY
+          
+          STACKS='${{ needs.list-stacks.outputs.stack-list }}'
+          echo "$STACKS" | jq -r '.[]' | while read stack; do
+            echo "- $stack" >> $GITHUB_STEP_SUMMARY
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Note**: This was a dry run. No stacks were actually deleted." >> $GITHUB_STEP_SUMMARY
+
+  delete-stacks:
+    name: Delete Stack
+    runs-on: ubuntu-latest
+    needs: [validate-environment, list-stacks]
+    if: github.event.inputs.dry-run != 'true' && needs.list-stacks.outputs.stack-count != '0'
+    strategy:
+      matrix:
+        stack-name: ${{ fromJson(needs.list-stacks.outputs.stack-list) }}
+      fail-fast: false
+    
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ needs.validate-environment.outputs.aws-region }}
+
+      - name: Delete Stack with Error Handling
+        id: delete-stack
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: ${{ matrix.stack-name }}
+          aws-region: ${{ needs.validate-environment.outputs.aws-region }}
+          wait-for-completion: 'true'
+        continue-on-error: true
+
+      - name: Handle Deletion Failure
+        if: steps.delete-stack.outputs.operation-result != 'success'
+        run: |
+          echo "::warning::Stack deletion failed or was skipped: ${{ matrix.stack-name }}"
+          echo "Result: ${{ steps.delete-stack.outputs.operation-result }}"
+          echo "Status: ${{ steps.delete-stack.outputs.stack-status }}"
+          echo "Summary: ${{ steps.delete-stack.outputs.summary }}"
+          
+          # Log to job summary
+          echo "### ❌ Failed: ${{ matrix.stack-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Result**: ${{ steps.delete-stack.outputs.operation-result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ steps.delete-stack.outputs.stack-status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Summary**: ${{ steps.delete-stack.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Handle Deletion Success
+        if: steps.delete-stack.outputs.operation-result == 'success'
+        run: |
+          echo "✅ Successfully deleted stack: ${{ matrix.stack-name }}"
+          echo "Time taken: ${{ steps.delete-stack.outputs.deletion-time }}"
+          
+          # Log to job summary
+          echo "### ✅ Success: ${{ matrix.stack-name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: ${{ steps.delete-stack.outputs.deletion-time }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Summary**: ${{ steps.delete-stack.outputs.summary }}" >> $GITHUB_STEP_SUMMARY
+
+  no-stacks-found:
+    name: No Stacks Found
+    runs-on: ubuntu-latest
+    needs: [validate-environment, list-stacks]
+    if: needs.validate-environment.outputs.can-proceed == 'true' && needs.list-stacks.outputs.stack-count == '0'
+    
+    steps:
+      - name: Report No Stacks
+        run: |
+          echo "No stacks found matching prefix: ${{ github.event.inputs.stack-prefix }}"
+          echo "Environment: ${{ github.event.inputs.environment }}"
+          echo "Region: ${{ needs.validate-environment.outputs.aws-region }}"
+          
+          echo "## No Stacks Found" >> $GITHUB_STEP_SUMMARY
+          echo "No stacks were found matching the specified criteria:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Prefix**: ${{ github.event.inputs.stack-prefix }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ github.event.inputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region**: ${{ needs.validate-environment.outputs.aws-region }}" >> $GITHUB_STEP_SUMMARY
+
+  validation-failed:
+    name: Validation Failed
+    runs-on: ubuntu-latest
+    needs: validate-environment
+    if: needs.validate-environment.outputs.can-proceed != 'true'
+    
+    steps:
+      - name: Report Validation Failure
+        run: |
+          echo "::error::Environment validation failed"
+          echo "Cannot proceed with stack deletion for environment: ${{ github.event.inputs.environment }}"
+          exit 1

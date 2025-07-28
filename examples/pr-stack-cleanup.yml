@@ -1,0 +1,108 @@
+# Pull Request Stack Cleanup
+# This workflow demonstrates cleaning up temporary stacks created for pull requests
+
+name: PR Stack Cleanup
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr-number:
+        description: 'PR number to clean up (leave empty for current PR)'
+        required: false
+        type: string
+
+jobs:
+  cleanup-pr-stack:
+    name: Cleanup PR Stack
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Determine PR Number
+        id: pr-info
+        run: |
+          if [ -n "${{ github.event.inputs.pr-number }}" ]; then
+            echo "pr-number=${{ github.event.inputs.pr-number }}" >> $GITHUB_OUTPUT
+          else
+            echo "pr-number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Delete PR Application Stack
+        id: delete-app-stack
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-app
+          aws-region: us-east-1
+          wait-for-completion: 'true'
+        continue-on-error: true
+
+      - name: Delete PR Database Stack
+        id: delete-db-stack
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-database
+          aws-region: us-east-1
+          wait-for-completion: 'true'
+        continue-on-error: true
+
+      - name: Delete PR Infrastructure Stack
+        id: delete-infra-stack
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
+        with:
+          stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-infrastructure
+          aws-region: us-east-1
+          wait-for-completion: 'true'
+        continue-on-error: true
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const appResult = '${{ steps.delete-app-stack.outputs.operation-result }}';
+            const dbResult = '${{ steps.delete-db-stack.outputs.operation-result }}';
+            const infraResult = '${{ steps.delete-infra-stack.outputs.operation-result }}';
+            
+            const results = [
+              { name: 'Application Stack', result: appResult, time: '${{ steps.delete-app-stack.outputs.deletion-time }}' },
+              { name: 'Database Stack', result: dbResult, time: '${{ steps.delete-db-stack.outputs.deletion-time }}' },
+              { name: 'Infrastructure Stack', result: infraResult, time: '${{ steps.delete-infra-stack.outputs.deletion-time }}' }
+            ];
+            
+            let comment = '## 🧹 PR Stack Cleanup Results\n\n';
+            comment += '| Stack | Status | Deletion Time |\n';
+            comment += '|-------|--------|---------------|\n';
+            
+            results.forEach(stack => {
+              const emoji = stack.result === 'success' ? '✅' : 
+                           stack.result === 'skipped' ? '⏭️' : '❌';
+              comment += `| ${stack.name} | ${emoji} ${stack.result} | ${stack.time || 'N/A'} |\n`;
+            });
+            
+            comment += '\n---\n';
+            comment += '*Cleanup completed automatically after PR closure.*';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Generate Job Summary
+        if: always()
+        run: |
+          echo "## PR Stack Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "PR Number: ${{ steps.pr-info.outputs.pr-number }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stack Deletion Results:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Application Stack**: ${{ steps.delete-app-stack.outputs.operation-result }} (${{ steps.delete-app-stack.outputs.deletion-time }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database Stack**: ${{ steps.delete-db-stack.outputs.operation-result }} (${{ steps.delete-db-stack.outputs.deletion-time }})" >> $GITHUB_STEP_SUMMARY
+          echo "- **Infrastructure Stack**: ${{ steps.delete-infra-stack.outputs.operation-result }} (${{ steps.delete-infra-stack.outputs.deletion-time }})" >> $GITHUB_STEP_SUMMARY
