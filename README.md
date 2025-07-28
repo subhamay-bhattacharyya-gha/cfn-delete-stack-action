@@ -65,7 +65,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Delete CloudFormation Stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ github.event.inputs.stack-name }}
 ```
@@ -95,7 +95,7 @@ jobs:
           aws-region: ${{ matrix.region }}
 
       - name: Delete Stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack }}
           aws-region: ${{ matrix.region }}
@@ -124,7 +124,7 @@ jobs:
 
       - name: Delete PR Stack
         id: delete-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: pr-${{ github.event.pull_request.number }}-stack
           aws-region: us-east-1
@@ -175,7 +175,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Delete Old Stacks
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: old-stack-name
           aws-region: us-east-1
@@ -251,7 +251,7 @@ The AWS credentials must have the following CloudFormation permissions:
 
 ```yaml
 - name: Delete Stack (Allow Missing)
-  uses: your-org/cloudformation-stack-delete-action@v1
+  uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
   with:
     stack-name: potentially-missing-stack
   continue-on-error: true
@@ -305,7 +305,7 @@ Enable debug logging by setting the `ACTIONS_STEP_DEBUG` secret to `true` in you
 
 ```yaml
 - name: Delete Stack (Debug Mode)
-  uses: your-org/cloudformation-stack-delete-action@v1
+  uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
   with:
     stack-name: my-stack
   env:
