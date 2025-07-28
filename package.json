@@ -1,7 +1,7 @@
 {
   "name": "cfn-delete-stack-action",
   "version": "0.0.0",
-  "description": "A sample project using semantic release with custom plugins.",
+  "description": "Delete CloudFormation stack GitHub action using semantic release with custom plugins.",
   "main": "index.js",
   "scripts": {
     "release": "semantic-release"
