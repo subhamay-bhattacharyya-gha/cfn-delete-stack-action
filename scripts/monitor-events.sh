@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/utils.sh"
 
 # Event monitoring configuration
-readonly DEFAULT_POLL_INTERVAL=5
+readonly DEFAULT_POLL_INTERVAL=2
 readonly MAX_EVENTS_PER_POLL=50
 readonly EVENT_DISPLAY_WIDTH=120
 
@@ -218,13 +218,14 @@ monitor_stack_events() {
     # Display events header
     display_events_header "$stack_name"
     
-    # Initialize tracking variables - start with empty timestamp to get all DELETE events
+    # Initialize tracking variables - track displayed events to avoid duplicates
     local last_event_timestamp=""
     local start_time
     start_time=$(date +%s)
     local events_displayed=0
     local monitoring_active=true
     local initial_display=true
+    declare -A displayed_events  # Track displayed events to avoid duplicates
     
     # Main monitoring loop
     while [[ "$monitoring_active" == true ]]; do
@@ -301,16 +302,11 @@ monitor_stack_events() {
             fi
         fi
         
-        # Get new events since last check (only if monitoring is still active)
+        # Get all DELETE events each time and deduplicate (more reliable for fast deletions)
         if [[ "$monitoring_active" == true ]]; then
             local events_json
-            # On first call, get all DELETE events; on subsequent calls, get events since last timestamp
-            if [[ "$initial_display" == true ]]; then
-                events_json=$(get_stack_events_since "$stack_name" "" "$region")
-                initial_display=false
-            else
-                events_json=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
-            fi
+            # Always get all DELETE events and deduplicate based on what we've already shown
+            events_json=$(get_stack_events_since "$stack_name" "" "$region")
             local events_exit_code=$?
             
             if [[ $events_exit_code -eq 0 ]]; then
@@ -323,22 +319,30 @@ monitor_stack_events() {
                     if [[ "$event_count" -gt 0 ]]; then
                         log_debug "Found $event_count new events"
                         
-                        # Display each event
+                        # Display each event (with deduplication)
                         local i=0
                         while [[ $i -lt $event_count ]]; do
                             local event
                             event=$(echo "$events_json" | jq ".[$i]" 2>/dev/null)
                             if [[ -n "$event" ]] && [[ "$event" != "null" ]]; then
-                                format_and_display_event "$event"
+                                # Create unique key for this event
+                                local event_key
+                                event_key=$(echo "$event" | jq -r '"\(.Timestamp)_\(.LogicalResourceId)_\(.ResourceStatus)"' 2>/dev/null)
                                 
-                                # Update last event timestamp
-                                local event_timestamp
-                                event_timestamp=$(echo "$event" | jq -r '.Timestamp' 2>/dev/null)
-                                if [[ "$event_timestamp" != "null" ]] && [[ -n "$event_timestamp" ]]; then
-                                    last_event_timestamp="$event_timestamp"
+                                # Only display if we haven't shown this event before
+                                if [[ -z "${displayed_events[$event_key]:-}" ]]; then
+                                    format_and_display_event "$event"
+                                    displayed_events[$event_key]=1
+                                    
+                                    # Update last event timestamp
+                                    local event_timestamp
+                                    event_timestamp=$(echo "$event" | jq -r '.Timestamp' 2>/dev/null)
+                                    if [[ "$event_timestamp" != "null" ]] && [[ -n "$event_timestamp" ]]; then
+                                        last_event_timestamp="$event_timestamp"
+                                    fi
+                                    
+                                    ((events_displayed++))
                                 fi
-                                
-                                ((events_displayed++))
                             fi
                             ((i++))
                         done
@@ -377,7 +381,12 @@ monitor_stack_events() {
         
         # Wait before next poll (unless we're stopping)
         if [[ "$monitoring_active" == true ]]; then
-            sleep "$poll_interval"
+            # Use shorter interval if we've seen deletion events to catch rapid changes
+            if [[ $events_displayed -gt 0 ]]; then
+                sleep 1  # Faster polling when deletion is active
+            else
+                sleep "$poll_interval"
+            fi
         fi
     done
     
