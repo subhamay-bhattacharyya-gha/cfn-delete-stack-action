@@ -18,37 +18,37 @@ fi
 log_info() {
     local message="$1"
     local timestamp=$(get_timestamp)
-    echo -e "${BLUE}[INFO]${NC} ${timestamp} - ${message}"
-    echo "::notice::${message}"
+    echo -e "${BLUE}[INFO]${NC} ${timestamp} - ${message}" >&2
+    echo "::notice::${message}" >&2
 }
 
 log_warning() {
     local message="$1"
     local timestamp=$(get_timestamp)
-    echo -e "${YELLOW}[WARN]${NC} ${timestamp} - ${message}"
-    echo "::warning::${message}"
+    echo -e "${YELLOW}[WARN]${NC} ${timestamp} - ${message}" >&2
+    echo "::warning::${message}" >&2
 }
 
 log_error() {
     local message="$1"
     local timestamp=$(get_timestamp)
     echo -e "${RED}[ERROR]${NC} ${timestamp} - ${message}" >&2
-    echo "::error::${message}"
+    echo "::error::${message}" >&2
 }
 
 log_success() {
     local message="$1"
     local timestamp=$(get_timestamp)
-    echo -e "${GREEN}[SUCCESS]${NC} ${timestamp} - ${message}"
-    echo "::notice::${message}"
+    echo -e "${GREEN}[SUCCESS]${NC} ${timestamp} - ${message}" >&2
+    echo "::notice::${message}" >&2
 }
 
 log_debug() {
     local message="$1"
     local timestamp=$(get_timestamp)
     if [[ "${DEBUG:-false}" == "true" ]]; then
-        echo -e "[DEBUG] ${timestamp} - ${message}"
-        echo "::debug::${message}"
+        echo -e "[DEBUG] ${timestamp} - ${message}" >&2
+        echo "::debug::${message}" >&2
     fi
 }
 
@@ -118,11 +118,11 @@ print_header() {
         border="${border}="
     done
     
-    echo ""
-    echo "$border"
-    echo "  $title"
-    echo "$border"
-    echo ""
+    echo "" >&2
+    echo "$border" >&2
+    echo "  $title" >&2
+    echo "$border" >&2
+    echo "" >&2
 }
 
 print_section() {
@@ -135,9 +135,9 @@ print_section() {
         border="${border}-"
     done
     
-    echo ""
-    echo " $title"
-    echo " $border"
+    echo "" >&2
+    echo " $title" >&2
+    echo " $border" >&2
 }
 
 # Progress indicator for long-running operations

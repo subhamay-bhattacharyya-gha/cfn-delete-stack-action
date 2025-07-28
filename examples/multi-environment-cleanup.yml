@@ -46,7 +46,7 @@ jobs:
 
       - name: Delete Development Stack
         id: delete-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack }}
           aws-region: ${{ matrix.region }}
@@ -81,7 +81,7 @@ jobs:
 
       - name: Delete Staging Stack
         id: delete-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack }}
           aws-region: ${{ matrix.region }}
@@ -114,7 +114,7 @@ jobs:
 
       - name: Delete Testing Stack
         id: delete-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack }}
           aws-region: ${{ matrix.region }}

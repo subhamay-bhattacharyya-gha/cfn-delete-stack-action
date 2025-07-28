@@ -135,11 +135,11 @@ format_and_display_event() {
     fi
     
     # Display the formatted event
-    printf "  %s  %-50s  %s" "$display_timestamp" "$resource_info" "$status_display"
+    printf "  %s  %-50s  %s" "$display_timestamp" "$resource_info" "$status_display" >&2
     if [[ -n "$status_reason" ]]; then
-        printf "  %s" "$status_reason"
+        printf "  %s" "$status_reason" >&2
     fi
-    printf "\n"
+    printf "\n" >&2
 }
 
 # Display events header
@@ -147,8 +147,8 @@ display_events_header() {
     local stack_name="$1"
     
     print_section "CloudFormation Events for Stack: $stack_name"
-    printf "  %-8s  %-50s  %-20s  %s\n" "Time" "Resource" "Status" "Reason"
-    printf "  %s\n" "$(printf '=%.0s' $(seq 1 $EVENT_DISPLAY_WIDTH))"
+    printf "  %-8s  %-50s  %-20s  %s\n" "Time" "Resource" "Status" "Reason" >&2
+    printf "  %s\n" "$(printf '=%.0s' $(seq 1 $EVENT_DISPLAY_WIDTH))" >&2
 }
 
 # Check if stack has reached a completion state

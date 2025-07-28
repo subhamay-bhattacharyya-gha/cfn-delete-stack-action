@@ -102,18 +102,18 @@ report_final_status() {
     summary_message=$(generate_status_summary "$stack_name" "$final_status" "$deletion_time" "$operation_result")
     
     # Display summary
-    echo "Stack Name: $stack_name"
-    echo "Final Status: $final_status"
-    echo "Operation Result: $operation_result"
-    echo "Duration: $deletion_time"
+    echo "Stack Name: $stack_name" >&2
+    echo "Final Status: $final_status" >&2
+    echo "Operation Result: $operation_result" >&2
+    echo "Duration: $deletion_time" >&2
     
     if [[ -n "$additional_info" ]]; then
-        echo "Additional Info: $additional_info"
+        echo "Additional Info: $additional_info" >&2
     fi
     
-    echo ""
-    echo "$summary_message"
-    echo ""
+    echo "" >&2
+    echo "$summary_message" >&2
+    echo "" >&2
     
     # Set GitHub Actions outputs
     set_github_output "stack-status" "$final_status"
@@ -154,22 +154,22 @@ generate_deletion_report() {
     
     print_section "Deletion Process Report"
     
-    echo "  Stack Information:"
-    echo "    Name: $stack_name"
-    echo "    Final Status: $final_status"
-    echo "    Operation Result: $operation_result"
-    echo ""
+    echo "  Stack Information:" >&2
+    echo "    Name: $stack_name" >&2
+    echo "    Final Status: $final_status" >&2
+    echo "    Operation Result: $operation_result" >&2
+    echo "" >&2
     
-    echo "  Timing Information:"
-    echo "    Start Time: $(date -d "@$start_time" '+%Y-%m-%d %H:%M:%S UTC')"
-    echo "    End Time: $(date -d "@$end_time" '+%Y-%m-%d %H:%M:%S UTC')"
-    echo "    Total Duration: $formatted_duration ($duration_seconds seconds)"
-    echo ""
+    echo "  Timing Information:" >&2
+    echo "    Start Time: $(date -d "@$start_time" '+%Y-%m-%d %H:%M:%S UTC')" >&2
+    echo "    End Time: $(date -d "@$end_time" '+%Y-%m-%d %H:%M:%S UTC')" >&2
+    echo "    Total Duration: $formatted_duration ($duration_seconds seconds)" >&2
+    echo "" >&2
     
-    echo "  Process Statistics:"
-    echo "    Events Monitored: $events_count"
-    echo "    Status Changes: $status_changes"
-    echo ""
+    echo "  Process Statistics:" >&2
+    echo "    Events Monitored: $events_count" >&2
+    echo "    Status Changes: $status_changes" >&2
+    echo "" >&2
     
     # Performance analysis
     local performance_rating
@@ -185,32 +185,32 @@ generate_deletion_report() {
         performance_rating="Very Slow (> 30 minutes)"
     fi
     
-    echo "  Performance: $performance_rating"
-    echo ""
+    echo "  Performance: $performance_rating" >&2
+    echo "" >&2
     
     # Generate recommendations based on results
     case "$operation_result" in
         "$STATUS_SUCCESS")
-            echo "  ✅ Deletion completed successfully. No further action required."
+            echo "  ✅ Deletion completed successfully. No further action required." >&2
             ;;
         "$STATUS_SKIPPED")
-            echo "  ⏭️ Deletion was skipped as the stack was already deleted or not found."
+            echo "  ⏭️ Deletion was skipped as the stack was already deleted or not found." >&2
             ;;
         "$STATUS_FAILED")
-            echo "  ❌ Deletion failed. Check CloudFormation console for detailed error information."
-            echo "     Consider manual cleanup of remaining resources if necessary."
+            echo "  ❌ Deletion failed. Check CloudFormation console for detailed error information." >&2
+            echo "     Consider manual cleanup of remaining resources if necessary." >&2
             ;;
         "$STATUS_TIMEOUT")
-            echo "  ⏰ Deletion timed out. The stack may still be deleting in the background."
-            echo "     Check CloudFormation console to monitor progress."
+            echo "  ⏰ Deletion timed out. The stack may still be deleting in the background." >&2
+            echo "     Check CloudFormation console to monitor progress." >&2
             ;;
         "$STATUS_ERROR")
-            echo "  🚨 An error occurred during the deletion process."
-            echo "     Review the logs above for specific error details."
+            echo "  🚨 An error occurred during the deletion process." >&2
+            echo "     Review the logs above for specific error details." >&2
             ;;
     esac
     
-    echo ""
+    echo "" >&2
 }
 
 # Create GitHub Actions job summary

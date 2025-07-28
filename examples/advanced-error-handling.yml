@@ -217,7 +217,7 @@ jobs:
           aws-region: ${{ github.event.inputs.aws-region }}
 
       - name: Monitor Existing Deletion
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ github.event.inputs.stack-name }}
           aws-region: ${{ github.event.inputs.aws-region }}

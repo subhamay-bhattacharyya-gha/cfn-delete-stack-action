@@ -316,7 +316,7 @@ Enable debug logging by setting the `ACTIONS_STEP_DEBUG` secret to `true` in you
 
 If you encounter issues not covered here:
 
-1. Check the [GitHub Issues](https://github.com/your-org/cloudformation-stack-delete-action/issues)
+1. Check the [GitHub Issues](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/issues)
 2. Review the action logs for detailed error messages
 3. Verify your AWS credentials and permissions
 4. Test the same operation using AWS CLI directly
@@ -358,7 +358,7 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- 📖 [Documentation](https://github.com/your-org/cloudformation-stack-delete-action/wiki)
-- 🐛 [Report Issues](https://github.com/your-org/cloudformation-stack-delete-action/issues)
-- 💬 [Discussions](https://github.com/your-org/cloudformation-stack-delete-action/discussions)
-- 📧 [Contact](mailto:support@your-org.com)
+- 📖 [Documentation](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/wiki)
+- 🐛 [Report Issues](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/issues)
+- 💬 [Discussions](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/discussions)
+- 📧 [Contact](mailto:subhamay.aws@gmail.com)

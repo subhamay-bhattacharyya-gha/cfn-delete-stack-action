@@ -36,7 +36,7 @@ jobs:
 
       - name: Delete PR Application Stack
         id: delete-app-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-app
           aws-region: us-east-1
@@ -45,7 +45,7 @@ jobs:
 
       - name: Delete PR Database Stack
         id: delete-db-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-database
           aws-region: us-east-1
@@ -54,7 +54,7 @@ jobs:
 
       - name: Delete PR Infrastructure Stack
         id: delete-infra-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: pr-${{ steps.pr-info.outputs.pr-number }}-infrastructure
           aws-region: us-east-1

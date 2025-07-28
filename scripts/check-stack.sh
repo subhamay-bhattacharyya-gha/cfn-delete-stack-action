@@ -274,22 +274,22 @@ display_stack_state() {
         esac
     done <<< "$state_details"
     
-    echo "  Stack Name: $stack_name"
-    echo "  Current Status: $stack_status"
-    echo "  Created: $creation_time"
+    echo "  Stack Name: $stack_name" >&2
+    echo "  Current Status: $stack_status" >&2
+    echo "  Created: $creation_time" >&2
     if [[ "$last_updated_time" != "N/A" ]]; then
-        echo "  Last Updated: $last_updated_time"
+        echo "  Last Updated: $last_updated_time" >&2
     fi
     if [[ "$status_reason" != "N/A" ]]; then
-        echo "  Status Reason: $status_reason"
+        echo "  Status Reason: $status_reason" >&2
     fi
     
     # Add region if specified
     if [[ -n "$region" ]]; then
-        echo "  Region: $region"
+        echo "  Region: $region" >&2
     fi
     
-    echo ""
+    echo "" >&2
 }
 
 # Main function to perform complete stack state analysis with risk assessment
@@ -332,8 +332,8 @@ perform_stack_analysis() {
         
         # Display analysis results
         print_section "Analysis Results"
-        echo "  Recommended Action: $action"
-        echo "  Reason: $message"
+        echo "  Recommended Action: $action" >&2
+        echo "  Reason: $message" >&2
         echo ""
         
         # Return the analysis result for use by calling scripts

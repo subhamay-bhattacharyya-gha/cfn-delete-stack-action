@@ -38,7 +38,7 @@ jobs:
 
       - name: Delete CloudFormation Stack
         id: delete-stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ github.event.inputs.stack-name }}
           aws-region: ${{ github.event.inputs.aws-region }}

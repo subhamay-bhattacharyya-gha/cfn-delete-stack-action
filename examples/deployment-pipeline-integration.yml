@@ -153,7 +153,7 @@ jobs:
           matrix:
             stack-name: ${{ fromJson(steps.find-old-stacks.outputs.stacks-to-delete) }}
           fail-fast: false
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack-name }}
           aws-region: ${{ env.AWS_REGION }}
@@ -193,7 +193,7 @@ jobs:
 
       - name: Delete Current Stack
         if: steps.find-current.outputs.current-stack != ''
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ steps.find-current.outputs.current-stack }}
           aws-region: ${{ env.AWS_REGION }}
@@ -254,7 +254,7 @@ jobs:
           matrix:
             stack-name: ${{ fromJson(steps.find-all-stacks.outputs.all-stacks) }}
           fail-fast: false
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ matrix.stack-name }}
           aws-region: ${{ env.AWS_REGION }}
@@ -274,7 +274,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Delete PR Stack
-        uses: your-org/cloudformation-stack-delete-action@v1
+        uses: subhamay-bhattacharyya-gha/cfn-delete-stack-action@main
         with:
           stack-name: ${{ env.APP_NAME }}-pr-${{ github.event.pull_request.number }}
           aws-region: ${{ env.AWS_REGION }}
