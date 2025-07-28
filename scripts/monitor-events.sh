@@ -100,6 +100,12 @@ get_stack_events_since() {
     delete_count=$(echo "$filtered_events" | jq 'length' 2>/dev/null || echo "0")
     log_debug "Found $delete_count DELETE events"
     
+    # Debug: log the actual events found (if debug is enabled)
+    if [[ "${DEBUG:-false}" == "true" ]] && [[ "$delete_count" -gt 0 ]]; then
+        log_debug "DELETE events found:"
+        echo "$filtered_events" | jq -r '.[] | "\(.Timestamp) \(.ResourceType)/\(.LogicalResourceId) \(.ResourceStatus)"' >&2 || true
+    fi
+    
     echo "$filtered_events"
     return 0
 }
@@ -138,12 +144,8 @@ format_and_display_event() {
         status_reason="${status_reason:0:57}..."
     fi
     
-    # Display the formatted event
-    printf "  %s  %-50s  %s" "$display_timestamp" "$resource_info" "$status_display" >&2
-    if [[ -n "$status_reason" ]]; then
-        printf "  %s" "$status_reason" >&2
-    fi
-    printf "\n" >&2
+    # Display the formatted event with proper column alignment
+    printf "  %-8s  %-50s  %-20s  %s\n" "$display_timestamp" "$resource_info" "$status_display" "$status_reason" >&2
 }
 
 # Display events header
@@ -268,6 +270,28 @@ monitor_stack_events() {
             local verify_result
             verify_result=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
             if [[ "$verify_result" =~ "does not exist" ]]; then
+                # Give a moment to fetch any final events before stopping
+                log_debug "Stack deleted, fetching final events before stopping monitoring"
+                local final_events
+                final_events=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
+                if [[ $? -eq 0 ]] && [[ -n "$final_events" ]]; then
+                    local final_count
+                    final_count=$(echo "$final_events" | jq 'length' 2>/dev/null || echo "0")
+                    if [[ "$final_count" -gt 0 ]]; then
+                        log_debug "Displaying $final_count final events"
+                        local i=0
+                        while [[ $i -lt $final_count ]]; do
+                            local event
+                            event=$(echo "$final_events" | jq ".[$i]" 2>/dev/null)
+                            if [[ -n "$event" ]] && [[ "$event" != "null" ]]; then
+                                format_and_display_event "$event"
+                                ((events_displayed++))
+                            fi
+                            ((i++))
+                        done
+                    fi
+                fi
+                
                 log_success "Stack '$stack_name' has been successfully deleted (confirmed by verification check)"
                 monitoring_active=false
                 echo "MONITORING_RESULT=completed"
