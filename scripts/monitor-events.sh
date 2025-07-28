@@ -125,7 +125,7 @@ format_and_display_event() {
     fi
     
     # Format the event line with proper spacing (no colors for clean CI/CD output)
-    local resource_info="${resource_type}/${logical_id}"
+    local resource_info="${logical_id}"
     local status_display="${resource_status}"
     
     # Truncate long resource info and status reason if needed
@@ -244,7 +244,7 @@ monitor_stack_events() {
             # Check if stack has reached completion state
             if [[ "$current_status" == "STACK_NOT_FOUND" ]]; then
                 # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
-                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "AWS::CloudFormation::Stack/${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
                 ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted"
@@ -269,7 +269,7 @@ monitor_stack_events() {
             verify_result=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
             if [[ "$verify_result" =~ "does not exist" ]]; then
                 # For simple stacks, add a synthetic DELETE_COMPLETE event for clarity
-                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "AWS::CloudFormation::Stack/${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
+                printf "  %-8s  %-50s  %-20s  %s\n" "$(date '+%H:%M:%S')" "${stack_name}" "DELETE_COMPLETE" "Stack deletion completed" >&2
                 ((events_displayed++))
                 
                 log_success "Stack '$stack_name' has been successfully deleted (confirmed by verification check)"
