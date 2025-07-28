@@ -433,8 +433,12 @@ setup_operation_timeout() {
             log_info "Running cleanup function: $cleanup_function"
             "$cleanup_function"
         fi
-        # Send SIGTERM to parent process group
-        kill -TERM -$$
+        # Send SIGTERM to parent process group (with error handling)
+        local parent_pgid
+        parent_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+        if [[ -n "$parent_pgid" ]] && [[ "$parent_pgid" != "0" ]]; then
+            kill -TERM -"$parent_pgid" 2>/dev/null || true
+        fi$
     ) &
     
     local timeout_pid=$!
@@ -445,9 +449,21 @@ setup_operation_timeout() {
 cancel_operation_timeout() {
     local timeout_pid="$1"
     
-    if [[ -n "$timeout_pid" ]] && kill -0 "$timeout_pid" 2>/dev/null; then
-        kill "$timeout_pid" 2>/dev/null || true
-        wait "$timeout_pid" 2>/dev/null || true
+    if [[ -n "$timeout_pid" ]]; then
+        # Check if process exists before trying to kill it
+        if kill -0 "$timeout_pid" 2>/dev/null; then
+            log_debug "Cancelling timeout process $timeout_pid"
+            kill "$timeout_pid" 2>/dev/null || true
+            # Give it a moment to terminate gracefully
+            sleep 0.1
+            # Force kill if still running
+            if kill -0 "$timeout_pid" 2>/dev/null; then
+                kill -9 "$timeout_pid" 2>/dev/null || true
+            fi
+            wait "$timeout_pid" 2>/dev/null || true
+        else
+            log_debug "Timeout process $timeout_pid already terminated"
+        fi
     fi
 }
 

@@ -66,6 +66,13 @@ get_stack_events_since() {
         fi
     fi
     
+    # Validate JSON before processing
+    if ! echo "$result" | jq empty 2>/dev/null; then
+        log_debug "Invalid JSON response from AWS API"
+        echo "[]"
+        return 1
+    fi
+    
     # Filter events since the specified timestamp using jq
     local filtered_events
     if [[ -n "$since_timestamp" ]] && [[ "$since_timestamp" != "null" ]]; then
@@ -73,10 +80,17 @@ get_stack_events_since() {
             .StackEvents 
             | map(select(.Timestamp > $since))
             | sort_by(.Timestamp)
-        ')
+        ' 2>/dev/null)
     else
         # If no timestamp provided, get all events (sorted by timestamp)
-        filtered_events=$(echo "$result" | jq '.StackEvents | sort_by(.Timestamp)')
+        filtered_events=$(echo "$result" | jq '.StackEvents | sort_by(.Timestamp)' 2>/dev/null)
+    fi
+    
+    # Validate the filtered result
+    if [[ -z "$filtered_events" ]] || ! echo "$filtered_events" | jq empty 2>/dev/null; then
+        log_debug "Failed to filter events or invalid result"
+        echo "[]"
+        return 1
     fi
     
     echo "$filtered_events"
@@ -254,44 +268,87 @@ monitor_stack_events() {
                 break
             fi
         else
-            log_debug "Could not determine stack status, continuing monitoring"
+            # If we can't get stack status, it might be deleted - check if it's a "does not exist" error
+            log_debug "Could not determine stack status, checking if stack was deleted"
+            # Try one more time to confirm stack doesn't exist
+            local verify_result
+            verify_result=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
+            if [[ "$verify_result" =~ "does not exist" ]]; then
+                log_success "Stack '$stack_name' has been successfully deleted (confirmed by verification check)"
+                monitoring_active=false
+                echo "MONITORING_RESULT=completed"
+                echo "EVENTS_DISPLAYED=$events_displayed"
+                echo "FINAL_STATUS=DELETE_COMPLETE"
+                break
+            fi
         fi
         
-        # Get new events since last check
-        local events_json
-        events_json=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
-        local events_exit_code=$?
-        
-        if [[ $events_exit_code -eq 0 ]]; then
-            # Process and display new events
-            local event_count
-            event_count=$(echo "$events_json" | jq 'length')
+        # Get new events since last check (only if monitoring is still active)
+        if [[ "$monitoring_active" == true ]]; then
+            local events_json
+            events_json=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
+            local events_exit_code=$?
             
-            if [[ "$event_count" -gt 0 ]]; then
-                log_debug "Found $event_count new events"
-                
-                # Display each event
-                local i=0
-                while [[ $i -lt $event_count ]]; do
-                    local event
-                    event=$(echo "$events_json" | jq ".[$i]")
-                    format_and_display_event "$event"
+            if [[ $events_exit_code -eq 0 ]]; then
+                # Validate that we got valid JSON before processing
+                if echo "$events_json" | jq empty 2>/dev/null; then
+                    # Process and display new events
+                    local event_count
+                    event_count=$(echo "$events_json" | jq 'length' 2>/dev/null || echo "0")
                     
-                    # Update last event timestamp
-                    local event_timestamp
-                    event_timestamp=$(echo "$event" | jq -r '.Timestamp')
-                    if [[ "$event_timestamp" != "null" ]]; then
-                        last_event_timestamp="$event_timestamp"
+                    if [[ "$event_count" -gt 0 ]]; then
+                        log_debug "Found $event_count new events"
+                        
+                        # Display each event
+                        local i=0
+                        while [[ $i -lt $event_count ]]; do
+                            local event
+                            event=$(echo "$events_json" | jq ".[$i]" 2>/dev/null)
+                            if [[ -n "$event" ]] && [[ "$event" != "null" ]]; then
+                                format_and_display_event "$event"
+                                
+                                # Update last event timestamp
+                                local event_timestamp
+                                event_timestamp=$(echo "$event" | jq -r '.Timestamp' 2>/dev/null)
+                                if [[ "$event_timestamp" != "null" ]] && [[ -n "$event_timestamp" ]]; then
+                                    last_event_timestamp="$event_timestamp"
+                                fi
+                                
+                                ((events_displayed++))
+                            fi
+                            ((i++))
+                        done
+                    else
+                        log_debug "No new events found"
                     fi
-                    
-                    ((events_displayed++))
-                    ((i++))
-                done
+                else
+                    log_debug "Invalid JSON response from events API, stack may have been deleted"
+                    # Check if stack still exists
+                    local stack_check
+                    stack_check=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
+                    if [[ "$stack_check" =~ "does not exist" ]]; then
+                        log_success "Stack '$stack_name' has been successfully deleted"
+                        monitoring_active=false
+                        echo "MONITORING_RESULT=completed"
+                        echo "EVENTS_DISPLAYED=$events_displayed"
+                        echo "FINAL_STATUS=DELETE_COMPLETE"
+                        break
+                    fi
+                fi
             else
-                log_debug "No new events found"
+                log_debug "Failed to retrieve events, checking if stack still exists"
+                # If we can't get events, check if the stack still exists
+                local stack_check
+                stack_check=$(aws cloudformation describe-stacks --stack-name "$stack_name" ${region:+--region "$region"} 2>&1 || true)
+                if [[ "$stack_check" =~ "does not exist" ]]; then
+                    log_success "Stack '$stack_name' has been successfully deleted"
+                    monitoring_active=false
+                    echo "MONITORING_RESULT=completed"
+                    echo "EVENTS_DISPLAYED=$events_displayed"
+                    echo "FINAL_STATUS=DELETE_COMPLETE"
+                    break
+                fi
             fi
-        else
-            log_warning "Failed to retrieve events, continuing monitoring"
         fi
         
         # Wait before next poll (unless we're stopping)
