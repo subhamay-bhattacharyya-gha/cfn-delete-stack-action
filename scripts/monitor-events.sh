@@ -75,15 +75,14 @@ get_stack_events_since() {
     if [[ -n "$since_timestamp" ]] && [[ "$since_timestamp" != "null" ]]; then
         filtered_events=$(echo "$result" | jq --arg since "$since_timestamp" '
             .StackEvents 
-            | map(select(.Timestamp > $since and (.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED"))))
+            | map(select(.Timestamp > $since))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     else
-        # If no timestamp provided, get all DELETE events from stack history (sorted by timestamp)
-        # Use a more comprehensive filter to catch all DELETE-related statuses
+        # If no timestamp provided, get all events from stack history (temporarily show all to debug)
+        # TODO: This shows all events for debugging - will filter back to DELETE only after testing
         filtered_events=$(echo "$result" | jq '
             .StackEvents 
-            | map(select(.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED")))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     fi
@@ -95,15 +94,15 @@ get_stack_events_since() {
         return 1
     fi
     
-    # Debug: log how many DELETE events were found
-    local delete_count
-    delete_count=$(echo "$filtered_events" | jq 'length' 2>/dev/null || echo "0")
-    log_debug "Found $delete_count DELETE events"
+    # Debug: log how many events were found
+    local event_count
+    event_count=$(echo "$filtered_events" | jq 'length' 2>/dev/null || echo "0")
+    log_info "Found $event_count total events for stack"
     
-    # Debug: log the actual events found (if debug is enabled)
-    if [[ "${DEBUG:-false}" == "true" ]] && [[ "$delete_count" -gt 0 ]]; then
-        log_debug "DELETE events found:"
-        echo "$filtered_events" | jq -r '.[] | "\(.Timestamp) \(.ResourceType)/\(.LogicalResourceId) \(.ResourceStatus)"' >&2 || true
+    # Debug: log the actual events found
+    if [[ "$event_count" -gt 0 ]]; then
+        log_info "All events found:"
+        echo "$filtered_events" | jq -r '.[] | "\(.Timestamp) \(.ResourceType)/\(.LogicalResourceId) \(.ResourceStatus) \(.ResourceStatusReason // "")"' >&2 || true
     fi
     
     echo "$filtered_events"
@@ -250,6 +249,17 @@ monitor_stack_events() {
         if [[ $status_exit_code -eq 0 ]]; then
             # Check if stack has reached completion state
             if [[ "$current_status" == "STACK_NOT_FOUND" ]]; then
+                log_info "Stack no longer exists, waiting 3 seconds for final events..."
+                sleep 3
+                # Try to get any final events
+                local final_events
+                final_events=$(get_stack_events_since "$stack_name" "" "$region")
+                if [[ $? -eq 0 ]] && [[ -n "$final_events" ]]; then
+                    local final_count
+                    final_count=$(echo "$final_events" | jq 'length' 2>/dev/null || echo "0")
+                    log_info "Final check found $final_count total events"
+                fi
+                
                 log_success "Stack '$stack_name' has been successfully deleted"
                 monitoring_active=false
                 echo "MONITORING_RESULT=completed"
