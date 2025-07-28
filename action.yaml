@@ -47,19 +47,19 @@ runs:
     #   with:
     #     aws-region: ${{ inputs.aws-region }}
 
-    # - name: Validate AWS Configuration
-    #   shell: bash
-    #   env:
-    #     AWS_REGION: ${{ inputs.aws-region }}
-    #   run: |
-    #     # Make scripts executable
-    #     chmod +x ${{ github.action_path }}/scripts/*.sh
+    - name: Validate AWS Configuration
+      shell: bash
+      env:
+        AWS_REGION: ${{ inputs.aws-region }}
+      run: |
+        # Make scripts executable
+        chmod +x ${{ github.action_path }}/scripts/*.sh
         
-    #     # Source utility functions
-    #     source ${{ github.action_path }}/scripts/utils.sh
+        # Source utility functions
+        source ${{ github.action_path }}/scripts/utils.sh
         
-    #     # Validate AWS configuration and credentials
-    #     ${{ github.action_path }}/scripts/validate-aws-config.sh
+        # Validate AWS configuration and credentials
+        ${{ github.action_path }}/scripts/validate-aws-config.sh
 
     - name: Delete CloudFormation Stack
       shell: bash
