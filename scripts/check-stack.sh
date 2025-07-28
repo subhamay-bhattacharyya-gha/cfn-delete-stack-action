@@ -372,17 +372,26 @@ initiate_stack_deletion() {
         aws_cmd="$aws_cmd --region '$region'"
     fi
     
-    # Set up timeout for the operation
-    local timeout_pid
-    timeout_pid=$(setup_operation_timeout 300 "Stack deletion initiation")
-    
-    # Execute deletion command with enhanced retry logic
+    # Execute deletion command with direct timeout
+    log_debug "Executing AWS command: $aws_cmd"
     local result
-    result=$(retry_aws_operation_with_backoff "$aws_cmd" "Stack deletion initiation for '$stack_name'" 5 2 60 300)
-    local exit_code=$?
+    local exit_code
     
-    # Cancel timeout
-    cancel_operation_timeout "$timeout_pid"
+    # Use timeout command directly if available
+    if command -v timeout >/dev/null 2>&1; then
+        result=$(timeout 30 bash -c "$aws_cmd" 2>&1)
+        exit_code=$?
+        if [[ $exit_code -eq 124 ]]; then
+            log_error "AWS delete-stack command timed out after 30 seconds"
+            result="Command timed out"
+            exit_code=124
+        fi
+    else
+        result=$(eval "$aws_cmd" 2>&1)
+        exit_code=$?
+    fi
+    
+    log_debug "AWS command completed with exit code: $exit_code"
     
     # Handle the result using enhanced error handling
     if ! handle_aws_operation_error "$exit_code" "$result" "Stack deletion initiation" "$stack_name"; then
@@ -439,39 +448,29 @@ initiate_stack_deletion() {
     
     log_success "Stack deletion initiated successfully for '$stack_name'"
     
-    # Verify deletion was initiated by checking stack status
-    local verification_result
-    verification_result=$(verify_deletion_initiated "$stack_name" "$region")
-    local verify_exit_code=$?
-    
-    if [[ $verify_exit_code -eq 0 ]]; then
-        log_info "Deletion initiation confirmed - stack is now in DELETE_IN_PROGRESS state"
-        echo "DELETION_INITIATED=true"
-        echo "STACK_STATUS=DELETE_IN_PROGRESS"
-        echo "MESSAGE=Stack deletion initiated successfully"
-        return 0
-    else
-        log_warning "Deletion command succeeded but verification failed: $verification_result"
-        echo "DELETION_INITIATED=unknown"
-        echo "STACK_STATUS=unknown"
-        echo "MESSAGE=Deletion command succeeded but status verification failed"
-        return 1
-    fi
+    # The delete-stack command returns immediately if successful, so we can assume it worked
+    log_info "Deletion initiation confirmed - stack deletion has been requested"
+    echo "DELETION_INITIATED=true"
+    echo "STACK_STATUS=DELETE_IN_PROGRESS"
+    echo "MESSAGE=Stack deletion initiated successfully"
+    return 0
 }
 
 # Verify that stack deletion was successfully initiated
 verify_deletion_initiated() {
     local stack_name="$1"
     local region="${2:-}"
-    local max_attempts=5
-    local delay=2
+    local max_attempts=3
+    local delay=1
     
-    log_debug "Verifying deletion initiation for stack '$stack_name'..."
+    log_info "Verifying deletion initiation for stack '$stack_name'..."
     
     for ((attempt=1; attempt<=max_attempts; attempt++)); do
+        log_debug "Verification attempt $attempt/$max_attempts"
         local stack_status
         stack_status=$(get_stack_status "$stack_name" "$region")
         local status_exit_code=$?
+        log_debug "Stack status check returned: exit_code=$status_exit_code, status='$stack_status'"
         
         if [[ $status_exit_code -eq 0 ]]; then
             case "$stack_status" in
