@@ -438,7 +438,7 @@ setup_operation_timeout() {
         parent_pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
         if [[ -n "$parent_pgid" ]] && [[ "$parent_pgid" != "0" ]]; then
             kill -TERM -"$parent_pgid" 2>/dev/null || true
-        fi$
+        fi
     ) &
     
     local timeout_pid=$!
