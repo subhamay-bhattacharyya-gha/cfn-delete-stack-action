@@ -75,14 +75,15 @@ get_stack_events_since() {
     if [[ -n "$since_timestamp" ]] && [[ "$since_timestamp" != "null" ]]; then
         filtered_events=$(echo "$result" | jq --arg since "$since_timestamp" '
             .StackEvents 
-            | map(select(.Timestamp > $since and (.ResourceStatus | contains("DELETE"))))
+            | map(select(.Timestamp > $since and (.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED"))))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     else
-        # If no timestamp provided, get only recent DELETE events (sorted by timestamp)
+        # If no timestamp provided, get all DELETE events from stack history (sorted by timestamp)
+        # Use a more comprehensive filter to catch all DELETE-related statuses
         filtered_events=$(echo "$result" | jq '
             .StackEvents 
-            | map(select(.ResourceStatus | contains("DELETE")))
+            | map(select(.ResourceStatus | test("DELETE_IN_PROGRESS|DELETE_COMPLETE|DELETE_FAILED")))
             | sort_by(.Timestamp)
         ' 2>/dev/null)
     fi
@@ -93,6 +94,11 @@ get_stack_events_since() {
         echo "[]"
         return 1
     fi
+    
+    # Debug: log how many DELETE events were found
+    local delete_count
+    delete_count=$(echo "$filtered_events" | jq 'length' 2>/dev/null || echo "0")
+    log_debug "Found $delete_count DELETE events"
     
     echo "$filtered_events"
     return 0
@@ -210,12 +216,13 @@ monitor_stack_events() {
     # Display events header
     display_events_header "$stack_name"
     
-    # Initialize tracking variables
-    local last_event_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    # Initialize tracking variables - start with empty timestamp to get all DELETE events
+    local last_event_timestamp=""
     local start_time
     start_time=$(date +%s)
     local events_displayed=0
     local monitoring_active=true
+    local initial_display=true
     
     # Main monitoring loop
     while [[ "$monitoring_active" == true ]]; do
@@ -273,7 +280,13 @@ monitor_stack_events() {
         # Get new events since last check (only if monitoring is still active)
         if [[ "$monitoring_active" == true ]]; then
             local events_json
-            events_json=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
+            # On first call, get all DELETE events; on subsequent calls, get events since last timestamp
+            if [[ "$initial_display" == true ]]; then
+                events_json=$(get_stack_events_since "$stack_name" "" "$region")
+                initial_display=false
+            else
+                events_json=$(get_stack_events_since "$stack_name" "$last_event_timestamp" "$region")
+            fi
             local events_exit_code=$?
             
             if [[ $events_exit_code -eq 0 ]]; then
