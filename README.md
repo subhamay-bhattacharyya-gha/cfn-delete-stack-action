@@ -2,7 +2,6 @@
 
 ![Built with Kiro](https://img.shields.io/badge/Built%20with-Kiro-blue?style=flat&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEyIDJMMTMuMDkgOC4yNkwyMCA5TDEzLjA5IDE1Ljc0TDEyIDIyTDEwLjkxIDE1Ljc0TDQgOUwxMC45MSA4LjI2TDEyIDJaIiBmaWxsPSJ3aGl0ZSIvPgo8L3N2Zz4K)&nbsp;![GitHub Action](https://img.shields.io/badge/GitHub-Action-blue?logo=github)&nbsp;![Release](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/actions/workflows/release.yaml/badge.svg)&nbsp;![Commit Activity](https://img.shields.io/github/commit-activity/t/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Bash](https://img.shields.io/badge/Language-Bash-green?logo=gnubash)&nbsp;![CloudFormation](https://img.shields.io/badge/AWS-CloudFormation-orange?logo=amazonaws)&nbsp;![Last Commit](https://img.shields.io/github/last-commit/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Release Date](https://img.shields.io/github/release-date/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Repo Size](https://img.shields.io/github/repo-size/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![File Count](https://img.shields.io/github/directory-file-count/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Issues](https://img.shields.io/github/issues/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Top Language](https://img.shields.io/github/languages/top/subhamay-bhattacharyya-gha/cfn-delete-stack-action)&nbsp;![Custom Endpoint](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/bsubhamay/9f5f5ffe16a8d90513e2db8b247e9905/raw/cfn-delete-stack-action.json?)
 
-
 A GitHub Action for deleting AWS CloudFormation stacks with real-time logging and comprehensive error handling.
 
 ## Overview
@@ -23,7 +22,7 @@ This GitHub Action provides a reusable composite workflow that deletes AWS Cloud
 ## Inputs
 
 | Name | Description | Required | Default | Example |
-|------|-------------|----------|---------|---------|
+| --- | --- | --- | --- | --- |
 | `stack-name` | Name of the CloudFormation stack to delete | Yes | — | `my-application-stack` |
 | `aws-region` | AWS region where the stack is located | No | `us-east-1` | `us-west-2` |
 | `wait-for-completion` | Whether to wait for deletion to complete | No | `true` | `false` |
@@ -31,7 +30,7 @@ This GitHub Action provides a reusable composite workflow that deletes AWS Cloud
 ## Outputs
 
 | Name | Description | Example |
-|------|-------------|---------|
+| --- | --- | --- |
 | `stack-status` | Final status of the stack deletion operation | `DELETE_COMPLETE` |
 | `deletion-time` | Time taken for the deletion process | `5m 32s` |
 | `operation-result` | Result of the deletion operation | `success` |
@@ -191,6 +190,7 @@ jobs:
 This action requires AWS credentials to be configured. You can use any of the following methods:
 
 1. **AWS Actions (Recommended)**:
+
    ```yaml
    - uses: aws-actions/configure-aws-credentials@v4
      with:
@@ -200,6 +200,7 @@ This action requires AWS credentials to be configured. You can use any of the fo
    ```
 
 2. **IAM Roles (Most Secure)**:
+
    ```yaml
    - uses: aws-actions/configure-aws-credentials@v4
      with:
@@ -208,6 +209,7 @@ This action requires AWS credentials to be configured. You can use any of the fo
    ```
 
 3. **Environment Variables**:
+
    ```yaml
    env:
      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -268,7 +270,8 @@ The AWS credentials must have the following CloudFormation permissions:
 **Behavior**: The action will monitor the existing deletion process instead of initiating a new one.
 
 **Log Output**:
-```
+
+```text
 Stack is already being deleted. Monitoring existing deletion process...
 ```
 
@@ -277,6 +280,7 @@ Stack is already being deleted. Monitoring existing deletion process...
 **Error**: Stack deletion fails due to dependent resources
 
 **Solution**: The action will display the specific CloudFormation error. You may need to:
+
 - Delete dependent stacks first
 - Remove dependencies manually
 - Use CloudFormation's force delete options (if available)
@@ -286,7 +290,8 @@ Stack is already being deleted. Monitoring existing deletion process...
 **Behavior**: The action implements exponential backoff for API throttling
 
 **Log Output**:
-```
+
+```text
 AWS API throttling detected. Retrying in 2 seconds...
 ```
 
@@ -353,6 +358,7 @@ This action includes comprehensive unit and integration tests:
 This repository uses **Semantic Release** for automated versioning and releases:
 
 #### Setup
+
 - **Node.js**: v22.14.0+ (with npm cache enabled)
 - **GitHub Actions**: Latest versions
   - `actions/checkout@v7` - Repository checkout
