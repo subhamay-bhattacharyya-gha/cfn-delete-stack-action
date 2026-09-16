@@ -348,11 +348,41 @@ This action includes comprehensive unit and integration tests:
 ./scripts/test-integration.sh
 ```
 
----
+### Release Process
 
-## License
+This repository uses **Semantic Release** for automated versioning and releases:
 
-MIT License - see the [LICENSE](LICENSE) file for details.
+#### Setup
+- **Node.js**: v22.14.0+ (with npm cache enabled)
+- **GitHub Actions**: Latest versions
+  - `actions/checkout@v7` - Repository checkout
+  - `actions/setup-node@v7` - Node.js setup with npm cache
+
+#### Automated Release Workflow
+
+The [Release Workflow](.github/workflows/release.yaml) runs automatically on push to `main` branch:
+
+1. Checks out the repository code
+2. Sets up Node.js v22.14.0+ with npm cache
+3. Installs dependencies with `npm ci`
+4. Runs `npx semantic-release` for automated versioning
+
+#### Manual Release Commands
+
+```bash
+# Install dependencies
+npm install
+
+# Run semantic release locally (requires GITHUB_TOKEN)
+npm run release
+
+# With custom configuration
+GITHUB_TOKEN=<your-token> npm run release
+```
+
+#### Configuration
+
+Semantic release configuration is defined in `scripts/plugins/release.config.js`. Commits follow [Conventional Commits](https://www.conventionalcommits.org/) standard for automatic version bumping.
 
 ---
 
@@ -362,3 +392,9 @@ MIT License - see the [LICENSE](LICENSE) file for details.
 - 🐛 [Report Issues](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/issues)
 - 💬 [Discussions](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/discussions)
 - 📧 [Contact](mailto:subhamay.aws@gmail.com)
+
+---
+
+## License
+
+MIT License - see the [LICENSE](LICENSE) file for details.
