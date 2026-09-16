@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/compare/v1.0.0...v1.1.0) (2026-09-16)
+
+
+### Features
+
+* Update CODEOWNERS, release workflow, and README; remove VERSION file ([976c12d](https://github.com/subhamay-bhattacharyya-gha/cfn-delete-stack-action/commit/976c12d74e6a2975fbaf2f75054e43c1ab449bec))
+
 # 1.0.0 (2025-07-28)
 
 
